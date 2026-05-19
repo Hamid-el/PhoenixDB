@@ -1,0 +1,3 @@
+[workspace]
+members = ["phoenix-core", "phoenix-server", "phoenix-client"]
+resolver = "2"

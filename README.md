@@ -1,6 +1,7 @@
 # PhoenixDB
 
 This project contains my personally built relational Database called PhoenixDB.
+It is mainly inspired by the SQLite database with some changes.
 
 ---
 
