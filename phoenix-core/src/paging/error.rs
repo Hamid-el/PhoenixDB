@@ -12,6 +12,18 @@ pub enum DbError {
     #[error("Invalid page ID")]
     InvalidPageId,
 
+    #[error("Page {page_id} is on the free list")]
+    PageFreed { page_id: u32 },
+
+    #[error("Page {page_id} already freed (double free)")]
+    DoubleFree { page_id: u32 },
+
+    #[error("Buffer pool full: all {pool_size} frames are pinned")]
+    BufferPoolFull { pool_size: usize },
+
+    #[error("Page {page_id} not found in buffer pool")]
+    PageNotInPool { page_id: u32 },
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

@@ -1,19 +1,22 @@
+use core::prelude::rust_2024::{Err, Ok};
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use log::{debug, info};
 
-use crate::paging::error::{DbError, Result};
 use crate::paging::constants::{INVALID_PAGE_ID, PAGE_SIZE};
+use crate::paging::error::{DbError, Result};
 use crate::paging::types::PageId;
 
 pub struct DiskManager {
     db_path: PathBuf,
     file: Mutex<File>,
     num_pages: AtomicU32,
+    free_list: Mutex<VecDeque<PageId>>,
 }
 
 impl DiskManager {
@@ -36,11 +39,13 @@ impl DiskManager {
             db_path,
             file: Mutex::new(file),
             num_pages: AtomicU32::new(num_pages),
+            free_list: Mutex::new(VecDeque::new()),
         })
     }
 
     pub fn read_page(&self, page_id: PageId) -> Result<[u8; PAGE_SIZE]> {
         self.validate_page_id(page_id)?;
+        self.check_not_free(page_id)?;
 
         let offset = Self::page_offset(page_id);
         let mut buf = [0u8; PAGE_SIZE];
@@ -55,6 +60,7 @@ impl DiskManager {
 
     pub fn write_page(&self, page_id: PageId, data: &[u8; PAGE_SIZE]) -> Result<()> {
         self.validate_page_id(page_id)?;
+        self.check_not_free(page_id)?;
 
         let offset = Self::page_offset(page_id);
 
@@ -68,6 +74,16 @@ impl DiskManager {
     }
 
     pub fn allocate_page(&self) -> Result<PageId> {
+        // Check free list first (reuse freed pages)
+        {
+            let mut free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+            if let Some(page_id) = free_list.pop_front() {
+                info!("Allocated page {} (reused from free list)", page_id);
+                return Ok(page_id);
+            }
+        }
+
+        // No free pages — extend the file
         let new_page_id = self.num_pages.fetch_add(1, Ordering::SeqCst);
         let offset = Self::page_offset(new_page_id);
         let zeroed = [0u8; PAGE_SIZE];
@@ -77,8 +93,29 @@ impl DiskManager {
         file.write_all(&zeroed)?;
         file.flush()?;
 
-        info!("Allocated page {}", new_page_id);
+        info!("Allocated page {} (new)", new_page_id);
         Ok(new_page_id)
+    }
+
+    pub fn free_page(&self, page_id: PageId) -> Result<()> {
+        if page_id == INVALID_PAGE_ID {
+            return Err(DbError::InvalidPageId);
+        }
+
+        let current_pages = self.num_pages.load(Ordering::SeqCst);
+        if page_id >= current_pages {
+            return Err(DbError::PageOutOfBounds { page_id, num_pages: current_pages });
+        }
+
+        let mut free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+
+        if free_list.contains(&page_id) {
+            return Err(DbError::DoubleFree { page_id });
+        }
+
+        free_list.push_back(page_id);
+        debug!("Freed page {}", page_id);
+        Ok(())
     }
 
     pub fn num_pages(&self) -> u32 {
@@ -99,6 +136,14 @@ impl DiskManager {
                 page_id,
                 num_pages: current_pages,
             });
+        }
+        Ok(())
+    }
+
+    fn check_not_free(&self, page_id: PageId) -> Result<()> {
+        let free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        if free_list.contains(&page_id) {
+            return Err(DbError::PageFreed { page_id });
         }
         Ok(())
     }
@@ -196,5 +241,81 @@ mod tests {
         assert_eq!(dm.read_page(0).unwrap()[0], 0xAA);
         assert_eq!(dm.read_page(1).unwrap()[0], 0xBB);
         assert_eq!(dm.read_page(2).unwrap()[0], 0xCC);
+    }
+
+    #[test]
+    fn test_free_page_and_reuse() {
+        let (dm, _tmp) = create_test_dm();
+
+        let p0 = dm.allocate_page().unwrap();
+        let p1 = dm.allocate_page().unwrap();
+        let p2 = dm.allocate_page().unwrap();
+        assert_eq!((p0, p1, p2), (0, 1, 2));
+
+        // Free page 1
+        dm.free_page(1).unwrap();
+
+        // Next allocation should reuse page 1
+        let reused = dm.allocate_page().unwrap();
+        assert_eq!(reused, 1);
+
+        // Next allocation extends file
+        let p3 = dm.allocate_page().unwrap();
+        assert_eq!(p3, 3);
+    }
+
+    #[test]
+    fn test_free_page_prevents_read_write() {
+        let (dm, _tmp) = create_test_dm();
+        dm.allocate_page().unwrap();
+
+        let mut data = [0u8; PAGE_SIZE];
+        data[0] = 0x42;
+        dm.write_page(0, &data).unwrap();
+
+        dm.free_page(0).unwrap();
+
+        assert!(matches!(dm.read_page(0), Err(DbError::PageFreed { page_id: 0 })));
+        assert!(matches!(dm.write_page(0, &data), Err(DbError::PageFreed { page_id: 0 })));
+    }
+
+    #[test]
+    fn test_double_free_error() {
+        let (dm, _tmp) = create_test_dm();
+        dm.allocate_page().unwrap();
+
+        dm.free_page(0).unwrap();
+        let result = dm.free_page(0);
+        assert!(matches!(result, Err(DbError::DoubleFree { page_id: 0 })));
+    }
+
+    #[test]
+    fn test_free_invalid_page() {
+        let (dm, _tmp) = create_test_dm();
+        dm.allocate_page().unwrap();
+
+        assert!(matches!(dm.free_page(INVALID_PAGE_ID), Err(DbError::InvalidPageId)));
+        assert!(matches!(dm.free_page(99), Err(DbError::PageOutOfBounds { .. })));
+    }
+
+    #[test]
+    fn test_alloc_free_alloc_cycle() {
+        let (dm, _tmp) = create_test_dm();
+
+        // Allocate 5 pages
+        for _ in 0..5 {
+            dm.allocate_page().unwrap();
+        }
+
+        // Free pages 2, 4 (FIFO order)
+        dm.free_page(2).unwrap();
+        dm.free_page(4).unwrap();
+
+        // Reallocate — should get 2, then 4
+        assert_eq!(dm.allocate_page().unwrap(), 2);
+        assert_eq!(dm.allocate_page().unwrap(), 4);
+
+        // Then extends
+        assert_eq!(dm.allocate_page().unwrap(), 5);
     }
 }

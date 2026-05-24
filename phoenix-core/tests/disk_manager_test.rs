@@ -1,11 +1,4 @@
-extern crate alloc;
-
 use std::thread;
-use alloc::vec::Vec;
-use core::{assert, assert_eq, matches};
-use core::iter::{IntoIterator, Iterator};
-use core::prelude::rust_2024::Err;
-
 
 use phoenix_core::paging::{DbError, DiskManager, INVALID_PAGE_ID, PAGE_SIZE};
 use tempfile::NamedTempFile;
@@ -112,4 +105,77 @@ fn test_concurrent_access() {
         let page = dm.read_page(page_id).unwrap();
         assert_eq!(page[0], expected_byte);
     }
+}
+
+// ---- Free List Tests ----
+
+#[test]
+fn test_free_page_reuse() {
+    let tmp = NamedTempFile::new().unwrap();
+    let dm = DiskManager::new(tmp.path()).unwrap();
+
+    let p0 = dm.allocate_page().unwrap();
+    let p1 = dm.allocate_page().unwrap();
+    let p2 = dm.allocate_page().unwrap();
+    assert_eq!((p0, p1, p2), (0, 1, 2));
+
+    dm.free_page(1).unwrap();
+    dm.free_page(0).unwrap();
+
+    // FIFO: should get 1 first, then 0
+    assert_eq!(dm.allocate_page().unwrap(), 1);
+    assert_eq!(dm.allocate_page().unwrap(), 0);
+    // Then extends file
+    assert_eq!(dm.allocate_page().unwrap(), 3);
+}
+
+#[test]
+fn test_free_page_blocks_access() {
+    let tmp = NamedTempFile::new().unwrap();
+    let dm = DiskManager::new(tmp.path()).unwrap();
+    dm.allocate_page().unwrap();
+
+    let mut data = [0u8; PAGE_SIZE];
+    data[0] = 0x42;
+    dm.write_page(0, &data).unwrap();
+
+    dm.free_page(0).unwrap();
+
+    assert!(matches!(dm.read_page(0), Err(DbError::PageFreed { page_id: 0 })));
+    assert!(matches!(dm.write_page(0, &data), Err(DbError::PageFreed { page_id: 0 })));
+}
+
+#[test]
+fn test_double_free_error() {
+    let tmp = NamedTempFile::new().unwrap();
+    let dm = DiskManager::new(tmp.path()).unwrap();
+    dm.allocate_page().unwrap();
+
+    dm.free_page(0).unwrap();
+    assert!(matches!(dm.free_page(0), Err(DbError::DoubleFree { page_id: 0 })));
+}
+
+#[test]
+fn test_realloc_after_free_allows_access() {
+    let tmp = NamedTempFile::new().unwrap();
+    let dm = DiskManager::new(tmp.path()).unwrap();
+    dm.allocate_page().unwrap();
+
+    let mut data = [0u8; PAGE_SIZE];
+    data[0] = 0xAA;
+    dm.write_page(0, &data).unwrap();
+
+    dm.free_page(0).unwrap();
+
+    // Reallocate page 0
+    let reused = dm.allocate_page().unwrap();
+    assert_eq!(reused, 0);
+
+    // Should be able to read/write again
+    let read = dm.read_page(0).unwrap();
+    assert_eq!(read[0], 0xAA); // old data still on disk
+
+    data[0] = 0xBB;
+    dm.write_page(0, &data).unwrap();
+    assert_eq!(dm.read_page(0).unwrap()[0], 0xBB);
 }
