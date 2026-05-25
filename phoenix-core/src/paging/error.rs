@@ -24,6 +24,15 @@ pub enum DbError {
     #[error("Page {page_id} not found in buffer pool")]
     PageNotInPool { page_id: u32 },
 
+    #[error("Duplicate key: {key}")]
+    DuplicateKey { key: u64 },
+
+    #[error("Key not found: {key}")]
+    KeyNotFound { key: u64 },
+
+    #[error("Corrupted node on page {page_id}: {reason}")]
+    CorruptedNode { page_id: u32, reason: String },
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
