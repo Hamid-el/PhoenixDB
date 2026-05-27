@@ -367,6 +367,10 @@ impl<'a, R: ReplacementStrategy, const VALUE_SIZE: usize> BPlusTree<'a, R, VALUE
 
         self.update_children_parent(new_page_id)?;
 
+        if key < push_up_key {
+            self.set_parent(right_child, internal_page_id)?;
+        }
+
         self.insert_in_parent(internal_page_id, push_up_key, new_page_id, grandparent_id)
     }
 
