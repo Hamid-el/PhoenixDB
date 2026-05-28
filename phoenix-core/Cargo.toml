@@ -8,7 +8,7 @@ description = "PhoenixDB core engine — embedded relational database"
 [dependencies]
 thiserror = "2"
 log = "0.4"
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 env_logger = "0.11"
