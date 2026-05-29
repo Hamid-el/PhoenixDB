@@ -136,7 +136,10 @@ impl<const RECORD_SIZE: usize> MinHeap<RECORD_SIZE> {
     fn sift_up(&mut self, mut idx: usize) {
         while idx > 0 {
             let parent = (idx - 1) / 2;
-            if self.entries[idx].key < self.entries[parent].key {
+            if self.entries[idx].key < self.entries[parent].key
+                || (self.entries[idx].key == self.entries[parent].key
+                    && self.entries[idx].run_index < self.entries[parent].run_index)
+            {
                 self.entries.swap(idx, parent);
                 idx = parent;
             } else {
@@ -152,10 +155,10 @@ impl<const RECORD_SIZE: usize> MinHeap<RECORD_SIZE> {
             let right = 2 * idx + 2;
             let mut smallest = idx;
 
-            if left < len && self.entries[left].key < self.entries[smallest].key {
+            if left < len && self.is_less(left, smallest) {
                 smallest = left;
             }
-            if right < len && self.entries[right].key < self.entries[smallest].key {
+            if right < len && self.is_less(right, smallest) {
                 smallest = right;
             }
             if smallest != idx {
@@ -165,6 +168,12 @@ impl<const RECORD_SIZE: usize> MinHeap<RECORD_SIZE> {
                 break;
             }
         }
+    }
+
+    fn is_less(&self, a: usize, b: usize) -> bool {
+        self.entries[a].key < self.entries[b].key
+            || (self.entries[a].key == self.entries[b].key
+                && self.entries[a].run_index < self.entries[b].run_index)
     }
 }
 
@@ -340,10 +349,24 @@ where
     while runs.len() > 1 {
         let mut new_runs = Vec::new();
 
-        for chunk in runs.chunks(max_k) {
-            let mut readers: Vec<RunReader<RECORD_SIZE>> = Vec::with_capacity(chunk.len());
+        let mut i = 0;
+        while i < runs.len() {
+            let chunk_end = (i + max_k).min(runs.len());
+            let chunk_len = chunk_end - i;
 
-            for run_desc in chunk {
+            if chunk_len == 1 {
+                new_runs.push(RunDescriptor {
+                    start_page: runs[i].start_page,
+                    num_pages: runs[i].num_pages,
+                    total_records: runs[i].total_records,
+                });
+                i = chunk_end;
+                continue;
+            }
+
+            let mut readers: Vec<RunReader<RECORD_SIZE>> = Vec::with_capacity(chunk_len);
+
+            for run_desc in &runs[i..chunk_end] {
                 let rd = RunDescriptor {
                     start_page: run_desc.start_page,
                     num_pages: run_desc.num_pages,
@@ -389,6 +412,8 @@ where
 
             let merged_run = output.finish(run_file)?;
             new_runs.push(merged_run);
+
+            i = chunk_end;
         }
 
         runs = new_runs;
@@ -446,17 +471,20 @@ impl<const RECORD_SIZE: usize> ExternalSort<RECORD_SIZE> {
             PAGE_SIZE - RUN_PAGE_HEADER_SIZE
         );
 
+        let buffer_pages = config.buffer_pages.max(1);
+        let max_k = config.max_k.max(2);
+
         let mut run_file = RunFile::new()?;
         let mut records = records;
 
         let runs = generate_runs::<RECORD_SIZE, _, _>(
             &mut records,
             &key_fn,
-            config.buffer_pages,
+            buffer_pages,
             &mut run_file,
         )?;
 
-        let final_run = merge_runs::<RECORD_SIZE, _>(runs, &key_fn, config.max_k, &mut run_file)?;
+        let final_run = merge_runs::<RECORD_SIZE, _>(runs, &key_fn, max_k, &mut run_file)?;
 
         SortedRunIterator::new(run_file, final_run)
     }
@@ -484,16 +512,16 @@ mod tests {
     #[test]
     fn test_min_heap_duplicates() {
         let mut heap = MinHeap::<8>::with_capacity(4);
+        heap.push(HeapEntry { key: 5, run_index: 2, record: [2; 8] });
         heap.push(HeapEntry { key: 5, run_index: 0, record: [0; 8] });
         heap.push(HeapEntry { key: 5, run_index: 1, record: [1; 8] });
-        heap.push(HeapEntry { key: 5, run_index: 2, record: [2; 8] });
 
         let a = heap.pop().unwrap();
         let b = heap.pop().unwrap();
         let c = heap.pop().unwrap();
-        assert_eq!(a.key, 5);
-        assert_eq!(b.key, 5);
-        assert_eq!(c.key, 5);
+        assert_eq!(a.run_index, 0);
+        assert_eq!(b.run_index, 1);
+        assert_eq!(c.run_index, 2);
         assert!(heap.is_empty());
     }
 
