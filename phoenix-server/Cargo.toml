@@ -1,0 +1,9 @@
+[package]
+name = "phoenix-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+phoenix-core = { path = "../phoenix-core" }
+log = "0.4"
+env_logger = "0.11"
