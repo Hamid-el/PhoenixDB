@@ -1,10 +1,17 @@
 use phoenix_core::paging::{BufferPoolManager, ClockStrategy, DiskManager};
-use phoenix_core::query::join::HashJoin;
+use phoenix_core::query::join::EquiHashJoin;
 use phoenix_core::query::scan::TableScan;
-use phoenix_core::query::sort::{Sort, SortConfig};
+use phoenix_core::query::sort::Sort;
+use phoenix_core::query::types::{Record, Value};
 use phoenix_core::query::Operator;
 use phoenix_core::storage::BPlusTree;
 use tempfile::NamedTempFile;
+
+fn decode_record(raw: &[u8]) -> Record {
+    let key = u64::from_le_bytes(raw[0..8].try_into().unwrap()) as i32;
+    let payload = u64::from_le_bytes(raw[8..16].try_into().unwrap()) as i32;
+    Record::new(vec![Value::Int(key), Value::Int(payload)])
+}
 
 fn setup_tree(n: u64) -> (&'static BufferPoolManager<ClockStrategy>, u32) {
     let tmp = NamedTempFile::new().unwrap();
@@ -26,25 +33,21 @@ fn setup_tree(n: u64) -> (&'static BufferPoolManager<ClockStrategy>, u32) {
     (bpm, root)
 }
 
-fn key_from_record(record: &Vec<u8>) -> u64 {
-    u64::from_le_bytes(record[0..8].try_into().unwrap())
-}
-
 #[test]
-fn test_cursor_full_scan() {
+fn test_table_scan_full() {
     let (bpm, root) = setup_tree(100);
 
-    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root);
+    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root, decode_record);
     scan.open().unwrap();
 
-    let mut count = 0u64;
-    let mut prev_key = 0u64;
+    let mut count = 0i32;
+    let mut prev_key = -1i32;
     while let Some(record) = scan.next().unwrap() {
-        let key = key_from_record(&record);
-        if count > 0 {
-            assert!(key > prev_key, "keys must be in ascending order");
-        }
-        assert_eq!(record.len(), 72);
+        let key = match record.get(0).unwrap() {
+            Value::Int(k) => *k,
+            _ => panic!("expected Int"),
+        };
+        assert!(key > prev_key, "keys must be in ascending order");
         prev_key = key;
         count += 1;
     }
@@ -53,15 +56,18 @@ fn test_cursor_full_scan() {
 }
 
 #[test]
-fn test_cursor_range_scan() {
+fn test_table_scan_range() {
     let (bpm, root) = setup_tree(1000);
 
-    let mut scan = TableScan::<ClockStrategy, 64>::range(bpm, root, 100, 200);
+    let mut scan = TableScan::<ClockStrategy, 64>::range(bpm, root, 100, 200, decode_record);
     scan.open().unwrap();
 
-    let mut count = 0u64;
+    let mut count = 0;
     while let Some(record) = scan.next().unwrap() {
-        let key = key_from_record(&record);
+        let key = match record.get(0).unwrap() {
+            Value::Int(k) => *k,
+            _ => panic!("expected Int"),
+        };
         assert!(key >= 100 && key <= 200);
         count += 1;
     }
@@ -70,21 +76,20 @@ fn test_cursor_range_scan() {
 }
 
 #[test]
-fn test_cursor_empty_tree() {
+fn test_table_scan_empty() {
     let (bpm, root) = setup_tree(0);
 
-    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root);
+    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root, decode_record);
     scan.open().unwrap();
-
     assert!(scan.next().unwrap().is_none());
     scan.close().unwrap();
 }
 
 #[test]
-fn test_table_scan_basic() {
+fn test_table_scan_payload() {
     let (bpm, root) = setup_tree(1000);
 
-    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root);
+    let mut scan = TableScan::<ClockStrategy, 64>::new(bpm, root, decode_record);
     scan.open().unwrap();
 
     let mut results = Vec::new();
@@ -95,10 +100,16 @@ fn test_table_scan_basic() {
 
     assert_eq!(results.len(), 1000);
     for (i, record) in results.iter().enumerate() {
-        let key = key_from_record(record);
-        assert_eq!(key, i as u64);
-        let payload = u64::from_le_bytes(record[8..16].try_into().unwrap());
-        assert_eq!(payload, i as u64 * 10);
+        let key = match record.get(0).unwrap() {
+            Value::Int(k) => *k,
+            _ => panic!("expected Int"),
+        };
+        let payload = match record.get(1).unwrap() {
+            Value::Int(p) => *p,
+            _ => panic!("expected Int"),
+        };
+        assert_eq!(key, i as i32);
+        assert_eq!(payload, i as i32 * 10);
     }
 }
 
@@ -131,26 +142,34 @@ fn test_sort_operator() {
         tree.insert(key, &value).unwrap();
     }
 
-    let scan = TableScan::<ClockStrategy, 64>::new(bpm, root);
-    let sort_key_fn: fn(&Vec<u8>) -> u64 = |record| {
-        u64::from_le_bytes(record[8..16].try_into().unwrap())
-    };
+    let scan = TableScan::<ClockStrategy, 64>::new(bpm, root, decode_record);
 
-    let mut sort_op = Sort::new(
-        Box::new(scan),
-        sort_key_fn,
-        SortConfig::default(),
-    );
+    fn sort_by_payload(a: &Record, b: &Record) -> std::cmp::Ordering {
+        let a_val = match a.get(1).unwrap() {
+            Value::Int(v) => *v,
+            _ => 0,
+        };
+        let b_val = match b.get(1).unwrap() {
+            Value::Int(v) => *v,
+            _ => 0,
+        };
+        a_val.cmp(&b_val)
+    }
+
+    let mut sort_op = Sort::new(Box::new(scan), sort_by_payload);
     sort_op.open().unwrap();
 
-    let mut prev_sort_key: Option<u64> = None;
+    let mut prev: Option<i32> = None;
     let mut count = 0;
     while let Some(record) = sort_op.next().unwrap() {
-        let sk = sort_key_fn(&record);
-        if let Some(prev) = prev_sort_key {
-            assert!(sk >= prev, "sort output not in order");
+        let payload = match record.get(1).unwrap() {
+            Value::Int(v) => *v,
+            _ => panic!("expected Int"),
+        };
+        if let Some(p) = prev {
+            assert!(payload >= p, "sort output not in order");
         }
-        prev_sort_key = Some(sk);
+        prev = Some(payload);
         count += 1;
     }
     sort_op.close().unwrap();
@@ -191,31 +210,29 @@ fn test_hash_join_basic() {
         tree_right.insert(i, &value).unwrap();
     }
 
-    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
-    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
+    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left, decode_record);
+    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right, decode_record);
 
-    let left_key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[0..8].try_into().unwrap());
-    let right_key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[0..8].try_into().unwrap());
-
-    let mut join = HashJoin::new(
+    // Join on key column (index 0)
+    let mut join = EquiHashJoin::new(
         Box::new(left_scan),
         Box::new(right_scan),
-        left_key_fn,
-        right_key_fn,
+        0,
+        0,
     );
     join.open().unwrap();
 
     let mut results = Vec::new();
     while let Some(record) = join.next().unwrap() {
-        assert_eq!(record.len(), 144);
+        assert_eq!(record.len(), 4); // left(2 fields) + right(2 fields)
         results.push(record);
     }
     join.close().unwrap();
 
     assert_eq!(results.len(), 50);
     for record in &results {
-        let left_key = u64::from_le_bytes(record[0..8].try_into().unwrap());
-        let right_key = u64::from_le_bytes(record[72..80].try_into().unwrap());
+        let left_key = record.get(0).unwrap();
+        let right_key = record.get(2).unwrap();
         assert_eq!(left_key, right_key);
     }
 }
@@ -252,25 +269,22 @@ fn test_hash_join_no_matches() {
         tree_right.insert(i, &value).unwrap();
     }
 
-    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
-    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
+    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left, decode_record);
+    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right, decode_record);
 
-    let key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[0..8].try_into().unwrap());
-
-    let mut join = HashJoin::new(
+    let mut join = EquiHashJoin::new(
         Box::new(left_scan),
         Box::new(right_scan),
-        key_fn,
-        key_fn,
+        0,
+        0,
     );
     join.open().unwrap();
-
     assert!(join.next().unwrap().is_none());
     join.close().unwrap();
 }
 
 #[test]
-fn test_hash_join_many_matches() {
+fn test_hash_join_many_to_many() {
     let tmp_left = NamedTempFile::new().unwrap();
     let dm_left = DiskManager::new(tmp_left.path()).unwrap();
     let bpm_left = Box::leak(Box::new(BufferPoolManager::new(
@@ -281,6 +295,7 @@ fn test_hash_join_many_matches() {
     let tree_left = BPlusTree::<ClockStrategy, 64>::create(bpm_left).unwrap();
     let root_left = tree_left.root_page_id();
 
+    // 20 records with payload = key % 5 (so 4 records per group)
     for i in 0..20u64 {
         let mut value = [0u8; 64];
         value[0..8].copy_from_slice(&(i % 5).to_le_bytes());
@@ -297,27 +312,22 @@ fn test_hash_join_many_matches() {
     let tree_right = BPlusTree::<ClockStrategy, 64>::create(bpm_right).unwrap();
     let root_right = tree_right.root_page_id();
 
+    // 10 records with payload = key % 5 (so 2 records per group)
     for i in 0..10u64 {
         let mut value = [0u8; 64];
         value[0..8].copy_from_slice(&(i % 5).to_le_bytes());
         tree_right.insert(i, &value).unwrap();
     }
 
-    let left_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
-    let right_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
+    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left, decode_record);
+    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right, decode_record);
 
-    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
-    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
-
-    let mut join = HashJoin::new(
+    // Join on payload column (index 1)
+    let mut join = EquiHashJoin::new(
         Box::new(left_scan),
         Box::new(right_scan),
-        left_key_fn,
-        right_key_fn,
+        1,
+        1,
     );
     join.open().unwrap();
 
@@ -327,6 +337,7 @@ fn test_hash_join_many_matches() {
     }
     join.close().unwrap();
 
+    // Each of the 5 groups: 4 left * 2 right = 8 matches, total = 40
     assert_eq!(count, 40);
 }
 
@@ -342,6 +353,7 @@ fn test_pipeline_scan_sort_join() {
     let tree_left = BPlusTree::<ClockStrategy, 64>::create(bpm_left).unwrap();
     let root_left = tree_left.root_page_id();
 
+    // Insert 100 records: key=i, payload=100-i (descending payloads)
     for i in 0..100u64 {
         let mut value = [0u8; 64];
         value[0..8].copy_from_slice(&(100 - i).to_le_bytes());
@@ -358,32 +370,29 @@ fn test_pipeline_scan_sort_join() {
     let tree_right = BPlusTree::<ClockStrategy, 64>::create(bpm_right).unwrap();
     let root_right = tree_right.root_page_id();
 
+    // Insert 50 records: key=i (1..51), payload=i
     for i in 1..51u64 {
         let mut value = [0u8; 64];
         value[0..8].copy_from_slice(&i.to_le_bytes());
         tree_right.insert(i, &value).unwrap();
     }
 
-    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
-    let sort_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
-    let sorted_left = Sort::new(Box::new(left_scan), sort_key_fn, SortConfig::default());
+    // Pipeline: left_scan -> sort(by payload) -> join(on payload = right payload)
+    let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left, decode_record);
 
-    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
+    fn sort_by_payload(a: &Record, b: &Record) -> std::cmp::Ordering {
+        a.get(1).cmp(&b.get(1))
+    }
 
-    let left_join_key: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
-    let right_join_key: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
+    let sorted_left = Sort::new(Box::new(left_scan), sort_by_payload);
+    let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right, decode_record);
 
-    let mut join = HashJoin::new(
+    // Join on payload column (index 1)
+    let mut join = EquiHashJoin::new(
         Box::new(sorted_left),
         Box::new(right_scan),
-        left_join_key,
-        right_join_key,
+        1,
+        1,
     );
     join.open().unwrap();
 
@@ -394,10 +403,9 @@ fn test_pipeline_scan_sort_join() {
     join.close().unwrap();
 
     assert_eq!(results.len(), 50);
-
     for record in &results {
-        let left_payload = u64::from_le_bytes(record[8..16].try_into().unwrap());
-        let right_payload = u64::from_le_bytes(record[80..88].try_into().unwrap());
+        let left_payload = record.get(1).unwrap();
+        let right_payload = record.get(3).unwrap();
         assert_eq!(left_payload, right_payload);
     }
 }
