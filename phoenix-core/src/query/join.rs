@@ -1,31 +1,31 @@
 use std::collections::HashMap;
 
 use crate::paging::error::Result;
-use crate::query::{DynOperator, Operator, Record, Value};
+use crate::query::{Operator, Record};
 
-pub struct EquiHashJoin<'a> {
-    left_child: DynOperator<'a>,
-    right_child: DynOperator<'a>,
-    left_join_key: usize,
-    right_join_key: usize,
-    hash_table: HashMap<Value, Vec<Record>>,
+pub struct HashJoin<'a> {
+    left: Box<dyn Operator + 'a>,
+    right: Box<dyn Operator + 'a>,
+    left_key_fn: fn(&Record) -> u64,
+    right_key_fn: fn(&Record) -> u64,
+    hash_table: HashMap<u64, Vec<Record>>,
     current_matches: Vec<Record>,
     match_cursor: usize,
     is_open: bool,
 }
 
-impl<'a> EquiHashJoin<'a> {
+impl<'a> HashJoin<'a> {
     pub fn new(
-        left_child: DynOperator<'a>,
-        right_child: DynOperator<'a>,
-        left_join_key: usize,
-        right_join_key: usize,
+        left: Box<dyn Operator + 'a>,
+        right: Box<dyn Operator + 'a>,
+        left_key_fn: fn(&Record) -> u64,
+        right_key_fn: fn(&Record) -> u64,
     ) -> Self {
         Self {
-            left_child,
-            right_child,
-            left_join_key,
-            right_join_key,
+            left,
+            right,
+            left_key_fn,
+            right_key_fn,
             hash_table: HashMap::new(),
             current_matches: Vec::new(),
             match_cursor: 0,
@@ -34,16 +34,16 @@ impl<'a> EquiHashJoin<'a> {
     }
 }
 
-impl Operator for EquiHashJoin<'_> {
+impl Operator for HashJoin<'_> {
     fn open(&mut self) -> Result<()> {
-        self.left_child.open()?;
+        self.left.open()?;
 
-        while let Some(record) = self.left_child.next()? {
-            let key = record.fields[self.left_join_key].clone();
+        while let Some(record) = self.left.next()? {
+            let key = (self.left_key_fn)(&record);
             self.hash_table.entry(key).or_default().push(record);
         }
 
-        self.right_child.open()?;
+        self.right.open()?;
         self.is_open = true;
         Ok(())
     }
@@ -56,21 +56,22 @@ impl Operator for EquiHashJoin<'_> {
                 return Ok(Some(record));
             }
 
-            let right_record = match self.right_child.next()? {
+            let right_record = match self.right.next()? {
                 Some(r) => r,
                 None => return Ok(None),
             };
 
-            let right_key = &right_record.fields[self.right_join_key];
+            let right_key = (self.right_key_fn)(&right_record);
 
             self.current_matches.clear();
             self.match_cursor = 0;
 
-            if let Some(left_records) = self.hash_table.get(right_key) {
+            if let Some(left_records) = self.hash_table.get(&right_key) {
                 for left_record in left_records {
-                    let mut joined_fields = left_record.fields.clone();
-                    joined_fields.extend(right_record.fields.iter().cloned());
-                    self.current_matches.push(Record::new(joined_fields));
+                    let mut joined = Vec::with_capacity(left_record.len() + right_record.len());
+                    joined.extend_from_slice(left_record);
+                    joined.extend_from_slice(&right_record);
+                    self.current_matches.push(joined);
                 }
             }
         }
@@ -81,7 +82,7 @@ impl Operator for EquiHashJoin<'_> {
         self.current_matches.clear();
         self.match_cursor = 0;
         self.is_open = false;
-        self.left_child.close()?;
-        self.right_child.close()
+        self.left.close()?;
+        self.right.close()
     }
 }
