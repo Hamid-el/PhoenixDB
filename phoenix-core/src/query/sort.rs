@@ -81,7 +81,10 @@ impl Operator for Sort<'_> {
     fn next(&mut self) -> Result<Option<Record>> {
         match &mut self.state {
             SortState::Uninitialized => Ok(None),
-            SortState::InMemory { records, cursor } => {
+            SortState::InMemory {
+                records,
+                cursor
+            } => {
                 if *cursor >= records.len() {
                     return Ok(None);
                 }
