@@ -5,7 +5,11 @@ use tempfile::NamedTempFile;
 fn create_tree(pool_size: usize) -> (BPlusTree<'static, ClockStrategy, 64>, NamedTempFile) {
     let tmp = NamedTempFile::new().unwrap();
     let dm = DiskManager::new(tmp.path()).unwrap();
-    let bpm = Box::leak(Box::new(BufferPoolManager::new(pool_size, dm, ClockStrategy::new(pool_size))));
+    let bpm = Box::leak(Box::new(BufferPoolManager::new(
+        pool_size,
+        dm,
+        ClockStrategy::new(pool_size),
+    )));
     let tree = BPlusTree::<ClockStrategy, 64>::create(bpm).unwrap();
     (tree, tmp)
 }
@@ -81,7 +85,11 @@ fn test_tree_persistence() {
     let root_id;
     {
         let dm = DiskManager::new(&path).unwrap();
-        let bpm = Box::leak(Box::new(BufferPoolManager::new(50, dm, ClockStrategy::new(50))));
+        let bpm = Box::leak(Box::new(BufferPoolManager::new(
+            50,
+            dm,
+            ClockStrategy::new(50),
+        )));
         let tree = BPlusTree::<ClockStrategy, 64>::create(bpm).unwrap();
 
         for i in 0..200u64 {
@@ -95,7 +103,11 @@ fn test_tree_persistence() {
     }
 
     let dm2 = DiskManager::new(&path).unwrap();
-    let bpm2 = Box::leak(Box::new(BufferPoolManager::new(50, dm2, ClockStrategy::new(50))));
+    let bpm2 = Box::leak(Box::new(BufferPoolManager::new(
+        50,
+        dm2,
+        ClockStrategy::new(50),
+    )));
     let tree2 = BPlusTree::<ClockStrategy, 64>::open(bpm2, root_id);
 
     for i in 0..200u64 {

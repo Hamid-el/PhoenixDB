@@ -75,7 +75,10 @@ fn test_error_on_out_of_bounds() {
     let result = dm.read_page(5);
     assert!(matches!(
         result,
-        Err(DbError::PageOutOfBounds { page_id: 5, num_pages: 3 })
+        Err(DbError::PageOutOfBounds {
+            page_id: 5,
+            num_pages: 3
+        })
     ));
 }
 
@@ -141,8 +144,14 @@ fn test_free_page_blocks_access() {
 
     dm.free_page(0).unwrap();
 
-    assert!(matches!(dm.read_page(0), Err(DbError::PageFreed { page_id: 0 })));
-    assert!(matches!(dm.write_page(0, &data), Err(DbError::PageFreed { page_id: 0 })));
+    assert!(matches!(
+        dm.read_page(0),
+        Err(DbError::PageFreed { page_id: 0 })
+    ));
+    assert!(matches!(
+        dm.write_page(0, &data),
+        Err(DbError::PageFreed { page_id: 0 })
+    ));
 }
 
 #[test]
@@ -152,7 +161,10 @@ fn test_double_free_error() {
     dm.allocate_page().unwrap();
 
     dm.free_page(0).unwrap();
-    assert!(matches!(dm.free_page(0), Err(DbError::DoubleFree { page_id: 0 })));
+    assert!(matches!(
+        dm.free_page(0),
+        Err(DbError::DoubleFree { page_id: 0 })
+    ));
 }
 
 #[test]

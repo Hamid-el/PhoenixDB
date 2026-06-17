@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 use log::{debug, info};
 
@@ -32,8 +32,8 @@ impl DiskManager {
 
         let file_len = file.metadata()?.len();
         let num_pages = (file_len / PAGE_SIZE as u64) as u32;
-
-        info!("DiskManager opened '{}' with {} pages", db_path.display(), num_pages);
+        
+        info!("DiskManager opened '{}' with {} pages",db_path.display(),num_pages);
 
         Ok(Self {
             db_path,
@@ -50,7 +50,9 @@ impl DiskManager {
         let offset = Self::page_offset(page_id);
         let mut buf = [0u8; PAGE_SIZE];
 
-        let mut file = self.file.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut file = self.file
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(&mut buf)?;
 
@@ -64,7 +66,9 @@ impl DiskManager {
 
         let offset = Self::page_offset(page_id);
 
-        let mut file = self.file.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut file = self.file
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;
         file.flush()?;
@@ -76,7 +80,9 @@ impl DiskManager {
     pub fn allocate_page(&self) -> Result<PageId> {
         // Check free list first (reuse freed pages)
         {
-            let mut free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+            let mut free_list = self.free_list
+                .lock()
+                .map_err(|e| DbError::Internal(e.to_string()))?;
             if let Some(page_id) = free_list.pop_front() {
                 info!("Allocated page {} (reused from free list)", page_id);
                 return Ok(page_id);
@@ -88,7 +94,10 @@ impl DiskManager {
         let offset = Self::page_offset(new_page_id);
         let zeroed = [0u8; PAGE_SIZE];
 
-        let mut file = self.file.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(&zeroed)?;
         file.flush()?;
@@ -104,10 +113,16 @@ impl DiskManager {
 
         let current_pages = self.num_pages.load(Ordering::SeqCst);
         if page_id >= current_pages {
-            return Err(DbError::PageOutOfBounds { page_id, num_pages: current_pages });
+            return Err(DbError::PageOutOfBounds {
+                page_id,
+                num_pages: current_pages,
+            });
         }
 
-        let mut free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut free_list = self
+            .free_list
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
         if free_list.contains(&page_id) {
             return Err(DbError::DoubleFree { page_id });
@@ -141,7 +156,10 @@ impl DiskManager {
     }
 
     fn check_not_free(&self, page_id: PageId) -> Result<()> {
-        let free_list = self.free_list.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let free_list = self
+            .free_list
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
         if free_list.contains(&page_id) {
             return Err(DbError::PageFreed { page_id });
         }
@@ -275,8 +293,14 @@ mod tests {
 
         dm.free_page(0).unwrap();
 
-        assert!(matches!(dm.read_page(0), Err(DbError::PageFreed { page_id: 0 })));
-        assert!(matches!(dm.write_page(0, &data), Err(DbError::PageFreed { page_id: 0 })));
+        assert!(matches!(
+            dm.read_page(0),
+            Err(DbError::PageFreed { page_id: 0 })
+        ));
+        assert!(matches!(
+            dm.write_page(0, &data),
+            Err(DbError::PageFreed { page_id: 0 })
+        ));
     }
 
     #[test]
@@ -294,8 +318,14 @@ mod tests {
         let (dm, _tmp) = create_test_dm();
         dm.allocate_page().unwrap();
 
-        assert!(matches!(dm.free_page(INVALID_PAGE_ID), Err(DbError::InvalidPageId)));
-        assert!(matches!(dm.free_page(99), Err(DbError::PageOutOfBounds { .. })));
+        assert!(matches!(
+            dm.free_page(INVALID_PAGE_ID),
+            Err(DbError::InvalidPageId)
+        ));
+        assert!(matches!(
+            dm.free_page(99),
+            Err(DbError::PageOutOfBounds { .. })
+        ));
     }
 
     #[test]

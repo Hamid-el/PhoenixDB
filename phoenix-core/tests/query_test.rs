@@ -132,15 +132,10 @@ fn test_sort_operator() {
     }
 
     let scan = TableScan::<ClockStrategy, 64>::new(bpm, root);
-    let sort_key_fn: fn(&Vec<u8>) -> u64 = |record| {
-        u64::from_le_bytes(record[8..16].try_into().unwrap())
-    };
+    let sort_key_fn: fn(&Vec<u8>) -> u64 =
+        |record| u64::from_le_bytes(record[8..16].try_into().unwrap());
 
-    let mut sort_op = Sort::new(
-        Box::new(scan),
-        sort_key_fn,
-        SortConfig::default(),
-    );
+    let mut sort_op = Sort::new(Box::new(scan), sort_key_fn, SortConfig::default());
     sort_op.open().unwrap();
 
     let mut prev_sort_key: Option<u64> = None;
@@ -257,12 +252,7 @@ fn test_hash_join_no_matches() {
 
     let key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[0..8].try_into().unwrap());
 
-    let mut join = HashJoin::new(
-        Box::new(left_scan),
-        Box::new(right_scan),
-        key_fn,
-        key_fn,
-    );
+    let mut join = HashJoin::new(Box::new(left_scan), Box::new(right_scan), key_fn, key_fn);
     join.open().unwrap();
 
     assert!(join.next().unwrap().is_none());
@@ -303,12 +293,8 @@ fn test_hash_join_many_matches() {
         tree_right.insert(i, &value).unwrap();
     }
 
-    let left_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
-    let right_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
+    let left_key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[8..16].try_into().unwrap());
+    let right_key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[8..16].try_into().unwrap());
 
     let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
     let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
@@ -365,19 +351,13 @@ fn test_pipeline_scan_sort_join() {
     }
 
     let left_scan = TableScan::<ClockStrategy, 64>::new(bpm_left, root_left);
-    let sort_key_fn: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
+    let sort_key_fn: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[8..16].try_into().unwrap());
     let sorted_left = Sort::new(Box::new(left_scan), sort_key_fn, SortConfig::default());
 
     let right_scan = TableScan::<ClockStrategy, 64>::new(bpm_right, root_right);
 
-    let left_join_key: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
-    let right_join_key: fn(&Vec<u8>) -> u64 = |r| {
-        u64::from_le_bytes(r[8..16].try_into().unwrap())
-    };
+    let left_join_key: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[8..16].try_into().unwrap());
+    let right_join_key: fn(&Vec<u8>) -> u64 = |r| u64::from_le_bytes(r[8..16].try_into().unwrap());
 
     let mut join = HashJoin::new(
         Box::new(sorted_left),

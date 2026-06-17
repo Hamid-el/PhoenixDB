@@ -90,7 +90,6 @@ impl<'a, R: ReplacementStrategy, const VALUE_SIZE: usize> BitmapScan<'a, R, VALU
     }
 }
 
-
 impl<R: ReplacementStrategy, const VALUE_SIZE: usize> Operator for BitmapScan<'_, R, VALUE_SIZE> {
     fn open(&mut self) -> Result<()> {
         if let Some(ref bitmap) = self.bitmap {

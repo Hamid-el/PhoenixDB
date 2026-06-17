@@ -29,13 +29,9 @@ pub struct Sort<'a> {
 
 enum SortState {
     Uninitialized,
-    InMemory {
-        records: Vec<Record>,
-        cursor: usize,
-    },
-    OnDisk {
-        iter: VarLengthRunIterator,
-    },
+    InMemory { records: Vec<Record>, 
+                cursor: usize },
+    OnDisk { iter: VarLengthRunIterator },
 }
 
 impl<'a> Sort<'a> {
@@ -81,10 +77,9 @@ impl Operator for Sort<'_> {
     fn next(&mut self) -> Result<Option<Record>> {
         match &mut self.state {
             SortState::Uninitialized => Ok(None),
-            SortState::InMemory {
-                records,
-                cursor
-            } => {
+            SortState::InMemory { 
+                records, 
+                cursor } => {
                 if *cursor >= records.len() {
                     return Ok(None);
                 }

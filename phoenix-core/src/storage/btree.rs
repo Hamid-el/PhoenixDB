@@ -6,7 +6,7 @@ use crate::paging::error::{DbError, Result};
 use crate::paging::replacement::ReplacementStrategy;
 use crate::paging::types::PageId;
 use crate::storage::node::{
-    InternalNode, InternalNodeMut, LeafNode, LeafNodeMut, NodeType, read_node_type,
+    read_node_type, InternalNode, InternalNodeMut, LeafNode, LeafNodeMut, NodeType,
 };
 
 pub struct BPlusTree<'a, R: ReplacementStrategy, const VALUE_SIZE: usize> {
@@ -409,14 +409,18 @@ impl<'a, R: ReplacementStrategy, const VALUE_SIZE: usize> BPlusTree<'a, R, VALUE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paging::replacement::ClockStrategy;
     use crate::paging::disk_manager::DiskManager;
+    use crate::paging::replacement::ClockStrategy;
     use tempfile::NamedTempFile;
 
     fn create_tree() -> (BPlusTree<'static, ClockStrategy, 64>, NamedTempFile) {
         let tmp = NamedTempFile::new().unwrap();
         let dm = DiskManager::new(tmp.path()).unwrap();
-        let bpm = Box::leak(Box::new(BufferPoolManager::new(100, dm, ClockStrategy::new(100))));
+        let bpm = Box::leak(Box::new(BufferPoolManager::new(
+            100,
+            dm,
+            ClockStrategy::new(100),
+        )));
         let tree = BPlusTree::<ClockStrategy, 64>::create(bpm).unwrap();
         (tree, tmp)
     }

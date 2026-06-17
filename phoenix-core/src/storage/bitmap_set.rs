@@ -80,7 +80,11 @@ impl BitSet {
         BitSetIter {
             bitset: self,
             word_idx: 0,
-            current_word: if self.bits.is_empty() { 0 } else { self.bits[0] },
+            current_word: if self.bits.is_empty() {
+                0
+            } else {
+                self.bits[0]
+            },
             base: 0,
         }
     }

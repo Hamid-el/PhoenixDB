@@ -87,14 +87,21 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             return Err(DbError::InvalidPageId);
         }
 
-        let mut state = self.state.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
         // Cache hit
         if let Some(&frame_id) = state.page_table.get(&page_id) {
             state.frames[frame_id as usize].pin_count += 1;
             state.replacer.record_access(frame_id);
             debug!("fetch_page({}) -> cache hit, frame {}", page_id, frame_id);
-            return Ok(PageHandle { bpm: self, frame_id, page_id });
+            return Ok(PageHandle {
+                bpm: self,
+                frame_id,
+                page_id,
+            });
         }
 
         // Cache miss
@@ -121,14 +128,26 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
         state.page_table.insert(page_id, frame_id);
         state.replacer.record_access(frame_id);
 
-        debug!("fetch_page({}) -> cache miss, loaded into frame {}", page_id, frame_id);
-        Ok(PageHandle { bpm: self, frame_id, page_id })
+        debug!(
+            "fetch_page({}) -> cache miss, loaded into frame {}",
+            page_id, frame_id
+        );
+        Ok(PageHandle {
+            bpm: self,
+            frame_id,
+            page_id,
+        })
     }
 
     pub fn unpin_page(&self, page_id: PageId, is_dirty: bool) -> Result<()> {
-        let mut state = self.state.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
-        let &frame_id = state.page_table.get(&page_id)
+        let &frame_id = state
+            .page_table
+            .get(&page_id)
             .ok_or(DbError::PageNotInPool { page_id })?;
 
         let meta = &mut state.frames[frame_id as usize];
@@ -141,12 +160,18 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             meta.is_dirty = true;
         }
 
-        debug!("unpin_page({}) -> pin_count={}, dirty={}", page_id, meta.pin_count, meta.is_dirty);
+        debug!(
+            "unpin_page({}) -> pin_count={}, dirty={}",
+            page_id, meta.pin_count, meta.is_dirty
+        );
         Ok(())
     }
 
     pub fn new_page(&self) -> Result<PageHandle<'_, R>> {
-        let mut state = self.state.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
         let frame_id = self.find_frame(&mut state)?;
 
@@ -164,7 +189,7 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             *frame_data = [0u8; PAGE_SIZE];
         }
 
-        // Update metadata
+        // update metadata
         state.frames[frame_id as usize] = FrameMeta {
             page_id: new_page_id,
             pin_count: 1,
@@ -173,14 +198,26 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
         state.page_table.insert(new_page_id, frame_id);
         state.replacer.record_access(frame_id);
 
-        info!("new_page() -> page_id={}, frame_id={}", new_page_id, frame_id);
-        Ok(PageHandle { bpm: self, frame_id, page_id: new_page_id })
+        info!(
+            "new_page() -> page_id={}, frame_id={}",
+            new_page_id, frame_id
+        );
+        Ok(PageHandle {
+            bpm: self,
+            frame_id,
+            page_id: new_page_id,
+        })
     }
 
     pub fn flush_page(&self, page_id: PageId) -> Result<()> {
-        let mut state = self.state.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
-        let &frame_id = state.page_table.get(&page_id)
+        let &frame_id = state
+            .page_table
+            .get(&page_id)
             .ok_or(DbError::PageNotInPool { page_id })?;
 
         if !state.frames[frame_id as usize].is_dirty {
@@ -198,7 +235,10 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
     }
 
     pub fn flush_all(&self) -> Result<()> {
-        let mut state = self.state.lock().map_err(|e| DbError::Internal(e.to_string()))?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
 
         for frame_id in 0..self.pool_size {
             let meta = &state.frames[frame_id];
@@ -207,9 +247,7 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             }
 
             let page_id = meta.page_id;
-            let data = *self.page_data[frame_id]
-                .read()
-                .expect("RwLock poisoned");
+            let data = *self.page_data[frame_id].read().expect("RwLock poisoned");
             self.disk_manager.write_page(page_id, &data)?;
             state.frames[frame_id].is_dirty = false;
         }
@@ -227,13 +265,19 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             return Ok(frame_id);
         }
 
-        // Build evictability mask for the replacer
-        let can_evict: Vec<bool> = state.frames.iter()
+        // build evictability mask for the replacer
+        let can_evict: Vec<bool> = state
+            .frames
+            .iter()
             .map(|f| f.pin_count == 0 && f.page_id != INVALID_PAGE_ID)
             .collect();
 
-        state.replacer.find_victim(&can_evict)
-            .ok_or(DbError::BufferPoolFull { pool_size: self.pool_size })
+        state
+            .replacer
+            .find_victim(&can_evict)
+            .ok_or(DbError::BufferPoolFull {
+                pool_size: self.pool_size,
+            })
     }
 
     /// Evict the page in the given frame (flush if dirty, remove from page_table).
@@ -362,7 +406,10 @@ mod tests {
         let _h1 = bpm.new_page().unwrap();
 
         let result = bpm.new_page();
-        assert!(matches!(result, Err(DbError::BufferPoolFull { pool_size: 2 })));
+        assert!(matches!(
+            result,
+            Err(DbError::BufferPoolFull { pool_size: 2 })
+        ));
     }
 
     #[test]
@@ -370,7 +417,9 @@ mod tests {
         let (bpm, tmp) = create_bpm(2);
 
         let handle = bpm.new_page().unwrap();
-        { handle.write()[0] = 0xFF; }
+        {
+            handle.write()[0] = 0xFF;
+        }
         bpm.unpin_page(0, true).unwrap();
 
         let handle = bpm.new_page().unwrap();
@@ -390,7 +439,9 @@ mod tests {
 
         for i in 0u8..3 {
             let handle = bpm.new_page().unwrap();
-            { handle.write()[0] = i + 1; }
+            {
+                handle.write()[0] = i + 1;
+            }
             bpm.unpin_page(handle.page_id(), true).unwrap();
         }
 
@@ -414,6 +465,9 @@ mod tests {
     fn test_page_not_in_pool_error() {
         let (bpm, _tmp) = create_bpm(4);
         let result = bpm.unpin_page(42, false);
-        assert!(matches!(result, Err(DbError::PageNotInPool { page_id: 42 })));
+        assert!(matches!(
+            result,
+            Err(DbError::PageNotInPool { page_id: 42 })
+        ));
     }
 }

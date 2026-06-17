@@ -3,7 +3,7 @@ use crate::paging::constants::INVALID_PAGE_ID;
 use crate::paging::error::{DbError, Result};
 use crate::paging::replacement::ReplacementStrategy;
 use crate::paging::types::PageId;
-use crate::storage::node::{InternalNode, LeafNode, NodeType, read_node_type};
+use crate::storage::node::{read_node_type, InternalNode, LeafNode, NodeType};
 
 pub struct BTreeCursor<'a, R: ReplacementStrategy, const VALUE_SIZE: usize> {
     bpm: &'a BufferPoolManager<R>,

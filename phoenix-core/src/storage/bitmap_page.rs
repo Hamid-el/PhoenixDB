@@ -112,8 +112,8 @@ impl<'a> BitmapDirPage<'a> {
         let key = u64::from_le_bytes(self.data[offset..offset + 8].try_into().unwrap());
         let first_bitmap_page =
             u32::from_le_bytes(self.data[offset + 8..offset + 12].try_into().unwrap());
-        let num_pages =
-            u16::from_le_bytes(self.data[offset + 12..offset + 14].try_into().unwrap());
+        let num_pages = u16::from_le_bytes(self.data[offset + 12..offset + 14].try_into().unwrap());
+        
         DirEntry {
             key,
             first_bitmap_page,
@@ -163,10 +163,8 @@ impl<'a> BitmapDirPageMut<'a> {
     pub fn set_entry_at(&mut self, idx: usize, entry: &DirEntry) {
         let offset = DIR_HEADER_SIZE + idx * DIR_ENTRY_SIZE;
         self.data[offset..offset + 8].copy_from_slice(&entry.key.to_le_bytes());
-        self.data[offset + 8..offset + 12]
-            .copy_from_slice(&entry.first_bitmap_page.to_le_bytes());
-        self.data[offset + 12..offset + 14]
-            .copy_from_slice(&entry.num_pages.to_le_bytes());
+        self.data[offset + 8..offset + 12].copy_from_slice(&entry.first_bitmap_page.to_le_bytes());
+        self.data[offset + 12..offset + 14].copy_from_slice(&entry.num_pages.to_le_bytes());
     }
 
     pub fn append_entry(&mut self, entry: &DirEntry) -> bool {
