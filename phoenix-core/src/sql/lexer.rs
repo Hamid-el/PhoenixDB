@@ -21,6 +21,10 @@ pub enum Token {
     False,
     And,
     Or,
+    Begin,
+    Commit,
+    Rollback,
+    Transaction,
     Identifier(String),
     Number(i32),
     String(String),
@@ -131,6 +135,7 @@ impl<'a> Lexer<'a> {
                 }
                 '<' => self.lex_less_than(),
                 '>' => self.lex_greater_than(),
+                '!' => self.lex_bang()?,
                 '\'' => self.lex_string()?,
                 ch if ch.is_ascii_digit() => self.lex_number()?,
                 ch if is_identifier_start(ch) => self.lex_identifier(),
@@ -182,6 +187,10 @@ impl<'a> Lexer<'a> {
             "FALSE" => Token::False,
             "AND" => Token::And,
             "OR" => Token::Or,
+            "BEGIN" => Token::Begin,
+            "COMMIT" => Token::Commit,
+            "ROLLBACK" => Token::Rollback,
+            "TRANSACTION" => Token::Transaction,
             _ => Token::Identifier(ident),
         }
     }
@@ -239,6 +248,20 @@ impl<'a> Lexer<'a> {
                 Token::NotEq
             }
             _ => Token::Lt,
+        }
+    }
+
+    fn lex_bang(&mut self) -> Result<Token, LexerError> {
+        let start = self.position;
+        self.advance();
+        if self.peek_char() == Some('=') {
+            self.advance();
+            Ok(Token::NotEq)
+        } else {
+            Err(LexerError::UnexpectedCharacter {
+                ch: '!',
+                position: start,
+            })
         }
     }
 

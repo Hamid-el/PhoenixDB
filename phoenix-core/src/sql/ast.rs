@@ -33,4 +33,7 @@ pub enum Statement {
         where_clause: Option<Expression>,
         order_by: Option<(String, bool)>,
     },
+    Begin,
+    Commit,
+    Rollback,
 }

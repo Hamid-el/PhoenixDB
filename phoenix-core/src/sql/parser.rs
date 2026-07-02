@@ -64,9 +64,22 @@ impl Parser {
             Token::Create => self.parse_create_table()?,
             Token::Insert => self.parse_insert()?,
             Token::Select => self.parse_select()?,
+            Token::Begin => {
+                self.advance();
+                self.consume_token(&Token::Transaction);
+                Statement::Begin
+            }
+            Token::Commit => {
+                self.advance();
+                Statement::Commit
+            }
+            Token::Rollback => {
+                self.advance();
+                Statement::Rollback
+            }
             token => {
                 return Err(ParseError::UnexpectedToken {
-                    expected: "CREATE, INSERT, or SELECT".to_string(),
+                    expected: "CREATE, INSERT, SELECT, BEGIN, COMMIT, or ROLLBACK".to_string(),
                     found: token.clone(),
                 });
             }
