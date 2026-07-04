@@ -113,3 +113,42 @@ fn test_parse_rejects_trailing_tokens() {
     let err = Parser::parse("SELECT * FROM users; SELECT * FROM orders;").unwrap_err();
     assert!(format!("{}", err).contains("end of input"));
 }
+
+#[test]
+fn test_parse_transaction_control() {
+    assert_eq!(parse_statement("BEGIN;").unwrap(), Statement::Begin);
+    assert_eq!(
+        parse_statement("BEGIN TRANSACTION;").unwrap(),
+        Statement::Begin
+    );
+    assert_eq!(parse_statement("COMMIT;").unwrap(), Statement::Commit);
+    assert_eq!(parse_statement("rollback").unwrap(), Statement::Rollback);
+}
+
+#[test]
+fn test_parse_bang_equals_is_not_eq() {
+    let statement = Parser::parse("SELECT * FROM users WHERE id != 5;").unwrap();
+
+    let Statement::Select {
+        where_clause: Some(expression),
+        ..
+    } = statement
+    else {
+        panic!("expected SELECT with WHERE clause");
+    };
+
+    assert_eq!(
+        expression,
+        Expression::BinaryOp {
+            left: Box::new(Expression::Identifier("id".to_string())),
+            op: "<>".to_string(),
+            right: Box::new(Expression::Literal(Value::Int(5))),
+        }
+    );
+}
+
+#[test]
+fn test_parse_lone_bang_rejected() {
+    let err = Parser::parse("SELECT * FROM users WHERE id ! 5;").unwrap_err();
+    assert!(format!("{}", err).contains("unexpected character '!'"));
+}
