@@ -378,8 +378,10 @@ where
             let mut heap = MinHeap::<RECORD_SIZE>::with_capacity(readers.len());
             for (i, reader) in readers.iter().enumerate() {
                 if let Some(key) = reader.peek_key(key_fn) {
-                    let record =
-                        read_record_from_page::<RECORD_SIZE>(&reader.page_buf, reader.current_record_idx);
+                    let record = read_record_from_page::<RECORD_SIZE>(
+                        &reader.page_buf,
+                        reader.current_record_idx,
+                    );
                     heap.push(HeapEntry {
                         key,
                         run_index: i,
@@ -477,13 +479,7 @@ impl<const RECORD_SIZE: usize> ExternalSort<RECORD_SIZE> {
         let mut run_file = RunFile::new()?;
         let mut records = records;
 
-        let runs = generate_runs::<RECORD_SIZE, _, _>(
-            &mut records,
-            &key_fn,
-            buffer_pages,
-            &mut run_file,
-        )?;
-
+        let runs = generate_runs::<RECORD_SIZE, _, _>(&mut records, &key_fn, buffer_pages, &mut run_file)?;
         let final_run = merge_runs::<RECORD_SIZE, _>(runs, &key_fn, max_k, &mut run_file)?;
 
         SortedRunIterator::new(run_file, final_run)

@@ -1,9 +1,9 @@
+mod bitmap_scan;
 pub mod cursor;
 pub mod join;
 pub mod scan;
 pub mod sort;
-mod types;
-mod bitmap_scan;
+pub mod types;
 
 use crate::paging::error::Result;
 

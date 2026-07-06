@@ -2,9 +2,7 @@ use phoenix_core::paging::{BufferPoolManager, ClockStrategy, DiskManager};
 use phoenix_core::storage::BitmapIndex;
 use tempfile::NamedTempFile;
 
-fn create_index(
-    pool_size: usize,
-) -> (BitmapIndex<'static, ClockStrategy>, NamedTempFile) {
+fn create_index(pool_size: usize) -> (BitmapIndex<'static, ClockStrategy>, NamedTempFile) {
     let tmp = NamedTempFile::new().unwrap();
     let dm = DiskManager::new(tmp.path()).unwrap();
     let bpm = Box::leak(Box::new(BufferPoolManager::new(

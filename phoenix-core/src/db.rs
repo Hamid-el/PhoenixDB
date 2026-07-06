@@ -39,5 +39,9 @@ pub fn shared_database<R: ReplacementStrategy, const VALUE_SIZE: usize>(
     disk_manager: DiskManager,
     replacer: R,
 ) -> SharedDatabase<R, VALUE_SIZE> {
-    Arc::new(RwLock::new(Database::new(pool_size, disk_manager, replacer)))
+    Arc::new(RwLock::new(Database::new(
+        pool_size,
+        disk_manager,
+        replacer,
+    )))
 }

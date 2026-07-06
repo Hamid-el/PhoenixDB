@@ -1,6 +1,6 @@
+use crate::paging::constants::INVALID_PAGE_ID;
 use crate::paging::constants::PAGE_SIZE;
 use crate::paging::types::PageId;
-use crate::paging::constants::INVALID_PAGE_ID;
 
 const INTERNAL_HEADER_SIZE: usize = 11;
 const LEAF_HEADER_SIZE: usize = 15;

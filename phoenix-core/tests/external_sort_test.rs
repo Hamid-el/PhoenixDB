@@ -13,7 +13,8 @@ fn make_record(key: u64, payload: u8) -> [u8; 16] {
 #[test]
 fn test_sort_empty_input() {
     let records: Vec<[u8; 16]> = vec![];
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
     assert!(result.is_empty());
 }
@@ -21,7 +22,8 @@ fn test_sort_empty_input() {
 #[test]
 fn test_sort_single_record() {
     let records = vec![make_record(42, 0xAA)];
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
     assert_eq!(result.len(), 1);
     assert_eq!(key_fn(&result[0]), 42);
@@ -35,7 +37,8 @@ fn test_sort_fits_in_memory() {
         .map(|i| make_record(i, (i & 0xFF) as u8))
         .collect();
 
-    let sorted = ExternalSort::<16>::sort(records.clone().into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.clone().into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
 
     assert_eq!(result.len(), 100);
@@ -58,7 +61,8 @@ fn test_sort_multiple_runs() {
         .map(|i| make_record(i, (i & 0xFF) as u8))
         .collect();
 
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, config).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, config).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
 
     assert_eq!(result.len(), total);
@@ -96,7 +100,8 @@ fn test_sort_already_sorted() {
         .map(|i| make_record(i, (i & 0xFF) as u8))
         .collect();
 
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
 
     assert_eq!(result.len(), 500);
@@ -112,7 +117,8 @@ fn test_sort_reverse_sorted() {
         .map(|i| make_record(i, (i & 0xFF) as u8))
         .collect();
 
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
 
     assert_eq!(result.len(), 1000);
@@ -127,7 +133,8 @@ fn test_sort_duplicates() {
         .map(|i| make_record(i / 4, (i & 0xFF) as u8))
         .collect();
 
-    let sorted = ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
+    let sorted =
+        ExternalSort::<16>::sort(records.into_iter(), key_fn, SortConfig::default()).unwrap();
     let result: Vec<_> = sorted.map(|r| r.unwrap()).collect();
 
     assert_eq!(result.len(), 200);
@@ -147,7 +154,9 @@ fn test_sort_large_dataset() {
     let total = 100_000usize;
     let records: Vec<[u8; 16]> = (0..total)
         .map(|_| {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let key = seed;
             make_record(key, (key & 0xFF) as u8)
         })
@@ -193,7 +202,11 @@ fn test_sort_then_bulk_load_btree() {
 
     let tmp = NamedTempFile::new().unwrap();
     let dm = DiskManager::new(tmp.path()).unwrap();
-    let bpm = Box::leak(Box::new(BufferPoolManager::new(100, dm, ClockStrategy::new(100))));
+    let bpm = Box::leak(Box::new(BufferPoolManager::new(
+        100,
+        dm,
+        ClockStrategy::new(100),
+    )));
     let tree = BPlusTree::<ClockStrategy, 64>::create(bpm).unwrap();
 
     for record in sorted {

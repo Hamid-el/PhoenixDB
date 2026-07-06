@@ -33,6 +33,30 @@ pub enum DbError {
     #[error("Corrupted node on page {page_id}: {reason}")]
     CorruptedNode { page_id: u32, reason: String },
 
+    #[error("Corrupted metadata: {0}")]
+    Corrupted(String),
+
+    #[error("SQL error: {0}")]
+    Sql(String),
+
+    #[error("Table '{0}' does not exist")]
+    TableNotFound(String),
+
+    #[error("Table '{0}' already exists")]
+    TableExists(String),
+
+    #[error("Column '{0}' does not exist in table '{1}'")]
+    ColumnNotFound(String, String),
+
+    #[error("Type error: {0}")]
+    TypeError(String),
+
+    #[error("Record too large: {size} bytes (max {max})")]
+    RecordTooLarge { size: usize, max: usize },
+
+    #[error("Transaction error: {0}")]
+    Transaction(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

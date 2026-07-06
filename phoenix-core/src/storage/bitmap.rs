@@ -4,8 +4,8 @@ use crate::paging::error::{DbError, Result};
 use crate::paging::replacement::ReplacementStrategy;
 use crate::paging::types::PageId;
 use crate::storage::bitmap_page::{
-    BitmapDataPage, BitmapDataPageMut, BitmapDirPage, BitmapDirPageMut, BitmapMetaPage,
-    BitmapMetaPageMut, DirEntry, BITS_PER_PAGE, WORDS_PER_PAGE, pages_needed_for_bits,
+    pages_needed_for_bits, BitmapDataPage, BitmapDataPageMut, BitmapDirPage, BitmapDirPageMut,
+    BitmapMetaPage, BitmapMetaPageMut, DirEntry, BITS_PER_PAGE, WORDS_PER_PAGE,
 };
 use crate::storage::bitmap_set::BitSet;
 
@@ -91,9 +91,11 @@ impl<'a, R: ReplacementStrategy> BitmapIndex<'a, R> {
     pub fn lookup(&self, key: u64) -> Result<BitSet> {
         let total_rows = self.read_total_rows()?;
         match self.find_dir_entry(key)? {
-            Some((_, _, entry)) => {
-                self.read_bitmap(entry.first_bitmap_page, entry.num_pages, total_rows as usize)
-            }
+            Some((_, _, entry)) => self.read_bitmap(
+                entry.first_bitmap_page,
+                entry.num_pages,
+                total_rows as usize,
+            ),
             None => Ok(BitSet::new(total_rows as usize)),
         }
     }
@@ -312,8 +314,7 @@ impl<'a, R: ReplacementStrategy> BitmapIndex<'a, R> {
             let words_this_page = WORDS_PER_PAGE.min(total_words - words_read);
             let mut page_words = vec![0u64; words_this_page];
             bmp.read_words(&mut page_words);
-            words[words_read..words_read + words_this_page]
-                .copy_from_slice(&page_words);
+            words[words_read..words_read + words_this_page].copy_from_slice(&page_words);
 
             drop(data);
             self.bpm.unpin_page(page_id, false)?;
