@@ -13,6 +13,9 @@ struct FrameMeta {
     page_id: PageId,
     pin_count: u32,
     is_dirty: bool,
+    /// True when the current dirty content of this frame has already been
+    /// captured into the WAL. Only meaningful while `is_dirty` is set.
+    wal_logged: bool,
 }
 
 struct PoolState<R: ReplacementStrategy> {
@@ -27,6 +30,11 @@ pub struct BufferPoolManager<R: ReplacementStrategy> {
     pool_size: usize,
     state: Mutex<PoolState<R>>,
     page_data: Vec<RwLock<[u8; PAGE_SIZE]>>,
+    /// With no-steal enabled, dirty pages whose content has not yet been
+    /// written to the WAL are never evicted (and thus never reach the data
+    /// file). This guarantees the data file only ever contains committed
+    /// data, which is what makes redo-only crash recovery correct.
+    no_steal: bool,
 }
 
 pub struct PageHandle<'a, R: ReplacementStrategy> {
@@ -55,11 +63,21 @@ impl<'a, R: ReplacementStrategy> PageHandle<'a, R> {
 
 impl<R: ReplacementStrategy> BufferPoolManager<R> {
     pub fn new(pool_size: usize, disk_manager: DiskManager, replacer: R) -> Self {
+        Self::new_with_policy(pool_size, disk_manager, replacer, false)
+    }
+
+    pub fn new_with_policy(
+        pool_size: usize,
+        disk_manager: DiskManager,
+        replacer: R,
+        no_steal: bool,
+    ) -> Self {
         let frames: Vec<FrameMeta> = (0..pool_size)
             .map(|_| FrameMeta {
                 page_id: INVALID_PAGE_ID,
                 pin_count: 0,
                 is_dirty: false,
+                wal_logged: false,
             })
             .collect();
 
@@ -67,7 +85,10 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             .map(|_| RwLock::new([0u8; PAGE_SIZE]))
             .collect();
 
-        info!("BufferPoolManager created with {} frames", pool_size);
+        info!(
+            "BufferPoolManager created with {} frames (no_steal={})",
+            pool_size, no_steal
+        );
 
         Self {
             disk_manager,
@@ -79,6 +100,7 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
                 replacer,
             }),
             page_data,
+            no_steal,
         }
     }
 
@@ -124,6 +146,7 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             page_id,
             pin_count: 1,
             is_dirty: false,
+            wal_logged: false,
         };
         state.page_table.insert(page_id, frame_id);
         state.replacer.record_access(frame_id);
@@ -158,6 +181,8 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
         }
         if is_dirty {
             meta.is_dirty = true;
+            // Fresh dirty content invalidates any earlier WAL capture
+            meta.wal_logged = false;
         }
 
         debug!(
@@ -194,6 +219,7 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
             page_id: new_page_id,
             pin_count: 1,
             is_dirty: false,
+            wal_logged: false,
         };
         state.page_table.insert(new_page_id, frame_id);
         state.replacer.record_access(frame_id);
@@ -256,6 +282,36 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
         Ok(())
     }
 
+    /// Snapshots every dirty page whose content has not yet been captured
+    /// into the WAL, and marks those frames as logged. Called by the engine
+    /// at commit time to build the WAL page-image records.
+    pub fn collect_dirty_unlogged(&self) -> Result<Vec<(PageId, Box<[u8; PAGE_SIZE]>)>> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
+
+        let mut pages = Vec::new();
+        for frame_id in 0..self.pool_size {
+            let meta = &state.frames[frame_id];
+            if meta.page_id == INVALID_PAGE_ID || !meta.is_dirty || meta.wal_logged {
+                continue;
+            }
+            let page_id = meta.page_id;
+            let data = *self.page_data[frame_id].read().expect("RwLock poisoned");
+            pages.push((page_id, Box::new(data)));
+            state.frames[frame_id].wal_logged = true;
+        }
+
+        debug!("collect_dirty_unlogged() -> {} pages", pages.len());
+        Ok(pages)
+    }
+
+    /// Forces the underlying data file down to the storage device.
+    pub fn sync(&self) -> Result<()> {
+        self.disk_manager.sync()
+    }
+
     /// Find a free frame or use the replacement strategy to pick a victim.
     fn find_frame(&self, state: &mut PoolState<R>) -> Result<FrameId> {
         // Check for free (unused) frames
@@ -266,10 +322,17 @@ impl<R: ReplacementStrategy> BufferPoolManager<R> {
         }
 
         // build evictability mask for the replacer
+        let no_steal = self.no_steal;
         let can_evict: Vec<bool> = state
             .frames
             .iter()
-            .map(|f| f.pin_count == 0 && f.page_id != INVALID_PAGE_ID)
+            .map(|f| {
+                f.pin_count == 0
+                    && f.page_id != INVALID_PAGE_ID
+                    // No-steal: dirty pages must not reach the data file
+                    // before their content is safely in the WAL.
+                    && (!no_steal || !f.is_dirty || f.wal_logged)
+            })
             .collect();
 
         state
