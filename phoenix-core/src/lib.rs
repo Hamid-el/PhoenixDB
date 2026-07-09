@@ -1,5 +1,9 @@
-mod db;
+pub mod catalog;
+pub mod db;
+pub mod encoding;
+pub mod engine;
 pub mod paging;
 pub mod query;
 pub mod sql;
 pub mod storage;
+pub mod wal;
