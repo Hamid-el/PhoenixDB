@@ -133,6 +133,37 @@ impl DiskManager {
         Ok(())
     }
 
+    /// Writes a page during WAL recovery, bypassing the bounds and free-list
+    /// checks: the page may lie beyond the current end of the file (the
+    /// crash happened after the WAL record was written but before the file
+    /// was extended). Extends the file and the page counter as needed.
+    pub fn write_page_raw(&self, page_id: PageId, data: &[u8; PAGE_SIZE]) -> Result<()> {
+        if page_id == INVALID_PAGE_ID {
+            return Err(DbError::InvalidPageId);
+        }
+
+        let offset = Self::page_offset(page_id);
+        let mut file = self.file
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(data)?;
+        file.flush()?;
+
+        self.num_pages.fetch_max(page_id + 1, Ordering::SeqCst);
+        debug!("Raw-wrote page {} (recovery)", page_id);
+        Ok(())
+    }
+
+    /// Forces all written data down to the storage device (fsync).
+    pub fn sync(&self) -> Result<()> {
+        let file = self.file
+            .lock()
+            .map_err(|e| DbError::Internal(e.to_string()))?;
+        file.sync_all()?;
+        Ok(())
+    }
+
     pub fn num_pages(&self) -> u32 {
         self.num_pages.load(Ordering::SeqCst)
     }
